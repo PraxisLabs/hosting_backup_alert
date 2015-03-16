@@ -1,0 +1,14 @@
+<?php
+
+/**
+ * Implementation of hook_uninstall()
+ */
+function hosting_backup_alert_uninstall() {
+  variable_del('hosting_backup_alert_default');
+  variable_del('hosting_backup_alert_last_check');
+  variable_del('hosting_backup_alert_last_sent');
+  variable_del('hosting_backup_alert_roles');
+  variable_del('hosting_backup_alert_stale_time');
+  variable_del('hosting_backup_alert_time_between_alerts');
+}
+

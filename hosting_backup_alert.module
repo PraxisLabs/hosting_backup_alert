@@ -1,0 +1,142 @@
+<?php
+
+/**
+ * Implementation of hook_menu().
+ */
+function hosting_backup_alert_menu() {
+  $items['admin/hosting/backup_alert'] = array(
+    'title' => 'Backup alerts',
+    'description' => 'Configure backup alert settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('hosting_backup_alert_settings'),
+    'access arguments' => array('administer sites'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Configuration form for hosting_backup_alert
+ */
+function hosting_backup_alert_settings() {
+  $form['hosting_backup_alert_stale_time'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Staleness timer (in hours)'),
+    '#description' => t('The backups must be at least this old to trigger an alert (1 week is 168h).'),
+    '#default_value' => variable_get('hosting_backup_alert_stale_time', '72'),
+    '#required' => TRUE,
+  );
+
+  $form['hosting_backup_alert_time_between_alerts'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Time between alerts (in hours)'),
+    '#description' => t('An alert will only be sent if this much time has passed since the last alert'),
+    '#default_value' => variable_get('hosting_backup_alert_time_between_alerts', '24'),
+    '#required' => TRUE,
+  );
+
+  $form['hosting_backup_alert_default'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Send alerts by default'),
+    '#description' => t('Can be overriden on a per-site basis'),
+    '#default_value' => variable_get('hosting_backup_alert_default', TRUE),
+  );
+
+  // Don't include the anonymous role as it makes no sense
+  $roles = user_roles(TRUE);
+
+  $form['hosting_backup_alert_roles'] = array(
+    '#title' => t('Roles to notify'),
+    '#description' => t('These roles will be notified when backups are stale.'),
+    '#type' => 'select',
+    '#options' => $roles,
+    '#multiple' => TRUE,
+//  6 = aegir administrator
+    '#default_value' => variable_get('hosting_backup_alert_roles',  array('6')),
+  );
+  
+  return system_settings_form($form);
+}
+
+function hosting_backup_alert_settings_validate($form, &$form_state) {
+  // TODO validate nid and time
+}
+
+function hosting_backup_alerts_get_stale_sites() {
+  $sites = array();
+
+  $stale_time_seconds = variable_get('hosting_backup_alert_stale_time', '72') * 60 * 60;
+  $threshold = time() - $stale_time_seconds;
+
+  // TODO: All the SQL could probably be replaced by a LET JOIN ?
+
+  // 1 = HOSTING_SITE_ENABLED
+  $result = db_query("SELECT nid FROM {hosting_site} WHERE status = 1 ORDER BY nid ASC");
+
+  while ($nid = db_fetch_object($result)) {
+    $sites[$nid->nid] = node_load($nid->nid);
+  }
+
+  $alerts = array();
+
+  foreach ($sites as $site_nid => $site_options) {
+    $result = db_query("SELECT count(site) as backup_count FROM hosting_site_backups WHERE timestamp > %d AND site=%d", $threshold, $site_nid);
+
+    $count = db_fetch_object($result);
+
+    if ($count->backup_count == 0) {
+      $alerts[$site_nid] = $site_options;
+    }
+  }
+
+  return $alerts;
+}
+
+/**
+ * Implements hook_cron().
+ */
+function hosting_backup_alert_cron() {
+  $time_since_last_check = time() - variable_get("hosting_backup_alert_last_check", 0);
+  $time_since_last_sent_alerts = time() - variable_get("hosting_backup_alert_last_sent", 0);
+
+  // Only check once per hour because hosting_backup_alert_stale_time is an int
+  if ($time_since_last_check > 60 * 60 * 0) {
+     variable_set("hosting_backup_alert_last_check", time());
+
+     $sites = hosting_backup_alerts_get_stale_sites();
+     if (empty($sites)) {
+       watchdog('hosting_backup_alert', t('Finished checking backups, all sites fresh.'));
+     }
+     else {
+       watchdog('hosting_backup_alert', t('Stale backups, sending alerts.') . ' Site nids: ' . implode(', ', array_keys($sites)), array(), WATCHDOG_ALERT);
+
+      if ($time_since_last_sent_alerts < variable_get('hosting_backup_alert_time_between_alerts', 1) * 60 * 60) {
+        watchdog('hosting_backup_alert', t('Alerts already sent for now.'));
+        return;
+      }
+
+       hosting_backup_alert_send_alerts($sites);
+     }
+  }
+}
+
+function hosting_backup_alert_send_alerts($sites) {
+  global $base_url;
+  variable_set("hosting_backup_alert_last_sent", time());
+
+  $roles = variable_get('hosting_backup_alert_roles', array('6'));
+
+  // TODO: Use a single query for all roles
+  foreach (array_keys($roles) as $rid) {
+    $sql = "SELECT u.uid as uid, u.name as name, u.mail as mail FROM {users} u
+       INNER JOIN {users_roles} ur ON u.uid = ur.uid
+       WHERE ur.rid = %d";
+     
+    $results = db_query($sql, $rid);
+     
+    while ($result = db_fetch_object($results)) {
+      // TODO: Use Drupal email templates, or improve this in general
+      mail($result->mail, "[alert] Stale backups on " . $base_url, 'Site nids: ' . implode(', ', array_keys($sites)));
+    }
+  }
+}

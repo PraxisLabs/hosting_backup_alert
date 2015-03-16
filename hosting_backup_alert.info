@@ -1,0 +1,6 @@
+name = Backup alerts
+decsrtiption = Sends notifications when no recent backups exist
+core = 6.x
+package = Hosting
+dependencies[] = hosting
+dependencies[] = hosting_site
