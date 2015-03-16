@@ -100,7 +100,7 @@ function hosting_backup_alert_cron() {
   $time_since_last_sent_alerts = time() - variable_get("hosting_backup_alert_last_sent", 0);
 
   // Only check once per hour because hosting_backup_alert_stale_time is an int
-  if ($time_since_last_check > 60 * 60 * 0) {
+  if ($time_since_last_check > 60 * 60) {
      variable_set("hosting_backup_alert_last_check", time());
 
      $sites = hosting_backup_alerts_get_stale_sites();
