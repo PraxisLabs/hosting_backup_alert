@@ -84,7 +84,8 @@ function hosting_backup_alerts_get_stale_sites() {
 
     $count = db_fetch_object($result);
 
-    if ($count->backup_count == 0) {
+    // Don't alert missing backups for sites created too recently
+    if ($count->backup_count == 0 && $site_options->created < $threshold) {
       $alerts[$site_nid] = $site_options;
     }
   }
